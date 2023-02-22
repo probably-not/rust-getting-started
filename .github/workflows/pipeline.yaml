@@ -1,0 +1,87 @@
+name: CI/CD Pipeline
+
+# Only run on the main branch or on open PRs
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: pipeline-${{ github.event.repository.name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+      - name: Ensure Latest Rust Version
+        run: rustup update stable && rustup default stable
+      - name: Cargo Fmt
+        run: |
+          cargo fmt
+          diff=$(git diff --color)
+
+          if [[ -z "${diff}" ]]; then
+          printf "\e[32m%s\e[0m\n" \
+            "Code is formatted!"
+          else
+            echo "${diff}"
+            printf "\n\e[31m%s\e[0m\n\n%s\n" \
+              "Code is not formatted!" \
+              'Run `cargo fmt` to update it.'
+            exit 1
+          fi
+  clippy:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+      - name: Ensure Latest Rust Version
+        run: rustup update stable && rustup default stable
+      - name: Lint
+        run: cargo clippy --all-targets --all-features -- -D warnings
+  test:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+      - name: Ensure Latest Rust Version
+        run: rustup update stable && rustup default stable
+      - name: Cargo Test
+        run: cargo test --verbose
+  build-fast:
+    needs: [fmt, clippy, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+      - name: Ensure Latest Rust Version
+        run: rustup update stable && rustup default stable
+      - name: Cargo Build
+        run: cargo build --verbose
+        env:
+          RUSTFLAGS: "-D warnings"
+  build-release:
+    needs: [build-fast]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+      - name: Ensure Latest Rust Version
+        run: rustup update stable && rustup default stable
+      - name: Cargo Build
+        run: cargo build --verbose --release
